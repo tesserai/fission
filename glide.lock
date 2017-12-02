@@ -1,5 +1,5 @@
-hash: 7c938e591b0602b9fd3412aeffd3f1438fc77eaea80c8d9dd03431adb0e1e1c9
-updated: 2017-11-28T13:53:51.161369563+08:00
+hash: b83691898dc51e8fc08b5f6450bb4b4ef01c8e8d871049d035ed059b4e4670e5
+updated: 2017-12-01T17:43:24.367377538-08:00
 imports:
 - name: cloud.google.com/go
   version: 3b1ae45394a234c385be014e9a488f2bb6eef821
@@ -80,9 +80,9 @@ imports:
 - name: github.com/gorilla/context
   version: 08b5f424b9271eedf6f9f0ce86cb9396ed337a42
 - name: github.com/gorilla/handlers
-  version: a4043c62cc2329bacda331d33fc908ab11ef0ec3
+  version: 90663712d74cb411cbef281bc1e08c19d1a76145
 - name: github.com/gorilla/mux
-  version: 24fca303ac6da784b9e8269f724ddeb0b2eea5e7
+  version: 7f08801859139f86dfafd1c296e2cba9a80d292e
 - name: github.com/graymeta/stow
   version: 1c51f76db54d79c9db24cb131011632eb586196c
   subpackages:
@@ -134,6 +134,8 @@ imports:
   version: a0006b13c722f7f12368c00a3d3c2ae8a999a0c6
   subpackages:
   - xxHash32
+- name: github.com/pkg/errors
+  version: f15c970de5b76fac0b59abb32d62c17cc7bed265
 - name: github.com/PuerkitoBio/purell
   version: 8a290539e2e8629dbc4e6bad948158f790ec31f4
 - name: github.com/PuerkitoBio/urlesc
