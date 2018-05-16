@@ -459,7 +459,7 @@ func (gp *GenericPool) createPool() error {
 								PreStop: &apiv1.Handler{
 									Exec: &apiv1.ExecAction{
 										Command: []string{
-											"sleep",
+											"/bin/sleep",
 											fmt.Sprintf("%v", gracePeriodSeconds),
 										},
 									},
@@ -500,7 +500,7 @@ func (gp *GenericPool) createPool() error {
 								PreStop: &apiv1.Handler{
 									Exec: &apiv1.ExecAction{
 										Command: []string{
-											"sleep",
+											"/bin/sleep",
 											fmt.Sprintf("%v", gracePeriodSeconds),
 										},
 									},
