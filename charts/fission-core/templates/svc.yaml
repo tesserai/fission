@@ -6,6 +6,8 @@ metadata:
     svc: router
     application: fission-router
     chart: "{{ .Chart.Name }}-{{ .Chart.Version }}"
+  annotations:
+{{ fromYaml .Values.routerServiceAnnotations | toYaml | indent 4 }}
 spec:
   type: {{ .Values.routerServiceType }}
   ports:

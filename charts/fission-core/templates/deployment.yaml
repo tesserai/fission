@@ -256,7 +256,7 @@ spec:
         args: ["--executorPort", "8888", "--namespace", "{{ .Values.functionNamespace }}", "--fission-namespace", "{{ .Release.Namespace }}"]
         env:
         - name: FETCHER_IMAGE
-          value: "{{ .Values.fetcherImage }}:{{ .Values.fetcherImageTag }}"
+          value: {{ if .Values.fetcherImageName }}"{{ .Values.fetcherImageName }}"{{ else }}"{{ .Values.fetcherImage }}:{{ .Values.fetcherImageTag }}"{{ end }}
         - name: FETCHER_IMAGE_PULL_POLICY
           value: "{{ .Values.pullPolicy }}"
         - name: ENABLE_ISTIO

@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/docopt/docopt-go"
+	docopt "github.com/docopt/docopt-go"
 
 	"github.com/fission/fission"
 	"github.com/fission/fission/buildermgr"
