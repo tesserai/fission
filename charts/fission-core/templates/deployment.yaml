@@ -203,6 +203,10 @@ spec:
             value: {{ .Values.routerRoundTripSvcAddressUpdateTimeout | default 30 | quote }}
           - name: DEBUG_ENV
             value: {{ .Values.debugEnv | quote }}
+        resources:
+          requests:
+            cpu: 1
+            memory: "2Gi"
         readinessProbe:
           httpGet:
             path: "/router-healthz"
@@ -269,6 +273,10 @@ spec:
           value: {{ .Values.fetcherMaxCpu | default "40m" | quote }}
         - name: FETCHER_MAXMEM
           value: {{ .Values.fetcherMaxMem | default "128Mi" | quote }}          
+        resources:
+          requests:
+            cpu: 1
+            memory: "2Gi"
         readinessProbe:
           httpGet:
             path: "/healthz"
