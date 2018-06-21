@@ -96,6 +96,25 @@ func MergeContainerSpecs(specs ...*apiv1.Container) apiv1.Container {
 	return *result
 }
 
+// MergePodSpecs merges container specs using a predefined order.
+//
+// The order of the arguments indicates which spec has precedence (lower index takes precedence over higher indexes).
+// Slices and maps are merged; other fields are set only if they are a zero value.
+func MergePodSpecs(specs ...*apiv1.PodSpec) apiv1.PodSpec {
+	result := &apiv1.PodSpec{}
+	for _, spec := range specs {
+		if spec == nil {
+			continue
+		}
+
+		err := mergo.Merge(result, spec)
+		if err != nil {
+			panic(err)
+		}
+	}
+	return *result
+}
+
 // IsNetworkDialError returns true if its a network dial error
 func IsNetworkDialError(err error) bool {
 	netErr, ok := err.(net.Error)

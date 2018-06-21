@@ -223,6 +223,15 @@ type (
 		// - ImagePullPolicy
 		// (optional)
 		Container *apiv1.Container `json:"container,omitempty"`
+
+		// PodSpec allows the modification of the deployed runtime
+		// pod spec using the Kubernetes PodSpec. Fission overrides
+		// the following fields:
+		// - Volumes
+		// - Containers
+		// - ServiceAccountName
+		// - TerminationGracePeriodSeconds
+		PodSpec *apiv1.PodSpec `json:"podspec,omitempty"`
 	}
 
 	Builder struct {

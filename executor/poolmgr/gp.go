@@ -407,7 +407,7 @@ func (gp *GenericPool) createPool() error {
 					Labels:      gp.labelsForPool,
 					Annotations: podAnnotations,
 				},
-				Spec: apiv1.PodSpec{
+				Spec: fission.MergePodSpecs(&apiv1.PodSpec{
 					Volumes: []apiv1.Volume{
 						{
 							Name: fission.SharedVolumeUserfunc,
@@ -541,6 +541,7 @@ func (gp *GenericPool) createPool() error {
 					// to pod after 6 mins.
 					TerminationGracePeriodSeconds: &gracePeriodSeconds,
 				},
+					gp.env.Spec.Runtime.PodSpec),
 			},
 		},
 	}
