@@ -17,9 +17,11 @@ limitations under the License.
 package storagesvc
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"os"
 	"strconv"
@@ -42,12 +44,26 @@ type (
 	}
 )
 
+func sha256HexDigest(f io.Reader) (string, error) {
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return "", err
+	}
+
+	return fmt.Sprintf("%x", h.Sum(nil)), nil
+}
+
 // Handle multipart file uploads.
 func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) {
 	// handle upload
-	r.ParseMultipartForm(0)
+	err := r.ParseMultipartForm(0)
+	if err != nil {
+		log.WithError(err).Error("error parsing multipart form")
+	}
+
 	file, handler, err := r.FormFile("uploadfile")
 	if err != nil {
+		log.WithError(err).Error("missing upload file")
 		http.Error(w, "missing upload file", http.StatusBadRequest)
 		return
 	}
@@ -72,13 +88,42 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
+	expectedFileSHA256s, ok := r.Header["X-File-Sha256"]
+	if !ok {
+		log.Errorf("Missing X-File-Sha256")
+		http.Error(w, "missing X-File-Sha256 header", http.StatusBadRequest)
+		return
+	}
+	expectedFileSHA256 := expectedFileSHA256s[0]
+
+	_, err = file.Seek(0, io.SeekStart)
+	var digest string
+	if err == nil {
+		digest, err = sha256HexDigest(file)
+		if err == nil {
+			_, err = file.Seek(0, io.SeekStart)
+		}
+	}
+	if err != nil {
+		log.WithError(err).Errorf("Error computing sha256 hexdigest")
+		http.Error(w, "Error computing sha256 hexdigest", http.StatusInternalServerError)
+		return
+	}
+
+	if digest != expectedFileSHA256 {
+		log.Errorf("Did not match expected X-File-Sha256 %s, got %s", expectedFileSHA256, digest)
+		http.Error(w, "Didn't match expected X-File-Sha256", http.StatusBadRequest)
+		return
+	}
+
 	// TODO: allow headers to add more metadata (e.g. environment
 	// and function metadata)
 	log.Infof("Handling upload for %v", handler.Filename)
 	//fileMetadata := make(map[string]interface{})
 	//fileMetadata["filename"] = handler.Filename
 
-	id, err := ss.storageClient.putFile(file, int64(fileSize))
+	uploadName, ok := mux.Vars(r)["archiveID"]
+	id, err := ss.storageClient.putFile(file, int64(fileSize), uploadName)
 	if err != nil {
 		log.WithError(err).Error("Error saving uploaded file")
 		http.Error(w, "Error saving uploaded file", http.StatusInternalServerError)
@@ -163,6 +208,7 @@ func MakeStorageService(storageClient *StowClient, port int) *StorageService {
 func (ss *StorageService) Start(port int) {
 	r := mux.NewRouter()
 	r.HandleFunc("/v1/archive", ss.uploadHandler).Methods("POST")
+	r.HandleFunc("/v1/archive/{archiveID}", ss.uploadHandler).Methods("POST")
 	r.HandleFunc("/v1/archive", ss.downloadHandler).Methods("GET")
 	r.HandleFunc("/v1/archive", ss.deleteHandler).Methods("DELETE")
 	r.HandleFunc("/healthz", ss.healthHandler).Methods("GET")

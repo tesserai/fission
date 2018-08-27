@@ -108,15 +108,17 @@ func MakeStowClient(storageType StorageType, storagePath string, containerName s
 }
 
 // putFile writes the file on the storage
-func (client *StowClient) putFile(file multipart.File, fileSize int64) (string, error) {
-	// This is not the item ID (that's returned by Put)
-	// should we just use handler.Filename? what are the constraints here?
-	uploadName := uuid.NewV4().String()
+func (client *StowClient) putFile(file multipart.File, fileSize int64, uploadName string) (string, error) {
+	if uploadName == "" {
+		// This is not the item ID (that's returned by Put)
+		// should we just use handler.Filename? what are the constraints here?
+		uploadName = uuid.NewV4().String()
+	}
 
 	// save the file to the storage backend
 	item, err := client.container.Put(uploadName, file, int64(fileSize), nil)
 	if err != nil {
-		log.WithError(err).Errorf("Error writing file: %s on storage", uploadName)
+		log.WithError(err).Errorf("Error writing file: %s on storage, size %d", uploadName, fileSize)
 		return "", ErrWritingFile
 	}
 
