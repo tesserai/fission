@@ -173,11 +173,13 @@ func (ts *HTTPTriggerSet) getRouter() *mux.Router {
 		}
 
 		ht := muxRouter.HandleFunc(trigger.Spec.RelativeURL, fh.handler)
-		ht.Methods(trigger.Spec.Method)
+		if trigger.Spec.Method != "" {
+			ht.Methods(trigger.Spec.Method)
+		}
 		if trigger.Spec.Host != "" {
 			ht.Host(trigger.Spec.Host)
 		}
-		if trigger.Spec.RelativeURL == "/" && trigger.Spec.Method == "GET" {
+		if trigger.Spec.RelativeURL == "/" && trigger.Spec.Method == "GET" || trigger.Spec.Method == "" {
 			homeHandled = true
 		}
 	}
