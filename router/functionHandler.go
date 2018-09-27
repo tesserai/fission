@@ -386,6 +386,10 @@ func (fh functionHandler) handler(responseWriter http.ResponseWriter, request *h
 		Transport: &RetryingRoundTripper{
 			funcHandler: &fh,
 		},
+		// NOTE We need this so that we can support functions with streaming outputs
+		//      It would be better to only use a FlushInterval if the response headers
+		//      indicate that it's necessary, but that requires a fork of ReverseProxy
+		FlushInterval: 1 * time.Second,
 	}
 
 	proxy.ServeHTTP(responseWriter, request)

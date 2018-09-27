@@ -19,10 +19,12 @@ package storagesvc
 import (
 	"errors"
 	"io"
-	"mime/multipart"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
+	"github.com/fission/fission/storagesvc/progress"
 	"github.com/graymeta/stow"
 	_ "github.com/graymeta/stow/local"
 	"github.com/satori/go.uuid"
@@ -43,6 +45,7 @@ type (
 		config    *storageConfig
 		location  stow.Location
 		container stow.Container
+		uploads   *UploadRegistry
 	}
 )
 
@@ -71,7 +74,8 @@ func MakeStowClient(storageType StorageType, storagePath string, containerName s
 	}
 
 	stowClient := &StowClient{
-		config: config,
+		config:  config,
+		uploads: NewUploadRegistry(),
 	}
 
 	cfg := stow.ConfigMap{"path": config.localPath}
@@ -108,15 +112,17 @@ func MakeStowClient(storageType StorageType, storagePath string, containerName s
 }
 
 // putFile writes the file on the storage
-func (client *StowClient) putFile(file multipart.File, fileSize int64, uploadName string) (string, error) {
+func (client *StowClient) putFile(reader io.Reader, fileSize int64, uploadName string) (string, error) {
 	if uploadName == "" {
 		// This is not the item ID (that's returned by Put)
 		// should we just use handler.Filename? what are the constraints here?
 		uploadName = uuid.NewV4().String()
 	}
 
-	// save the file to the storage backend
-	item, err := client.container.Put(uploadName, file, int64(fileSize), nil)
+	r := client.uploads.declare(uploadName, fileSize, reader)
+	defer client.uploads.remove(uploadName, r)
+
+	item, err := client.container.Put(uploadName, r, int64(fileSize), nil)
 	if err != nil {
 		log.WithError(err).Errorf("Error writing file: %s on storage, size %d", uploadName, fileSize)
 		return "", ErrWritingFile
@@ -124,6 +130,51 @@ func (client *StowClient) putFile(file multipart.File, fileSize int64, uploadNam
 
 	log.Debugf("Successfully wrote file:%s on storage", uploadName)
 	return item.ID(), nil
+}
+
+type completedUpload int64
+
+func (cu completedUpload) N() int64 {
+	return int64(cu)
+}
+
+func (cu completedUpload) Err() error {
+	return io.EOF
+}
+
+func (client *StowClient) status(uploadName string) (progress.Counter, int64, error) {
+	counter, size := client.uploads.get(uploadName)
+
+	if counter != nil {
+		return counter, size, nil
+	}
+
+	// HACK(adamb) Delete this uploadName -> itemID logic once any of:
+	//     1) we stop using stow's local backend
+	//     2) https://github.com/graymeta/stow/issues/170 is closed
+	//     3) https://github.com/graymeta/stow/pull/175 is merged
+	var itemID string
+	if strings.HasPrefix(uploadName, "/") {
+		itemID = uploadName
+	} else {
+		itemID = filepath.Join(client.container.ID(), uploadName)
+	}
+
+	item, err := client.container.Item(itemID)
+	if err != nil {
+		if err == stow.ErrNotFound {
+			return nil, -1, ErrNotFound
+		} else {
+			return nil, -1, err
+		}
+	}
+
+	size, err = item.Size()
+	if err != nil {
+		return nil, -1, err
+	}
+
+	return completedUpload(size), size, nil
 }
 
 // copyFileToStream gets the file contents into a stream
@@ -145,6 +196,7 @@ func (client *StowClient) copyFileToStream(fileId string, w io.Writer) error {
 
 	_, err = io.Copy(w, f)
 	if err != nil {
+		log.WithError(err).Printf("Error copying file: %s into httpresponse", fileId)
 		return ErrWritingFileIntoResponse
 	}
 

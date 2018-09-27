@@ -17,17 +17,22 @@ limitations under the License.
 package storagesvc
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"hash"
 	"io"
 	"net/http"
+	"net/textproto"
 	"os"
 	"strconv"
 	"time"
 
 	"github.com/fission/fission"
+	"github.com/fission/fission/storagesvc/multipartformdata"
+	"github.com/fission/fission/storagesvc/progress"
 	"github.com/gorilla/mux"
 	_ "github.com/graymeta/stow/local"
 	log "github.com/sirupsen/logrus"
@@ -39,36 +44,24 @@ type (
 		port          int
 	}
 
+	UploadStatus struct {
+		Status string `json:"status"`
+		N      int64  `json:"n"`
+		Size   int64  `json:"size"`
+		Err    error  `json:"error,omitempty"`
+	}
+
 	UploadResponse struct {
 		ID string `json:"id"`
 	}
 )
 
-func sha256HexDigest(f io.Reader) (string, error) {
-	h := sha256.New()
-	if _, err := io.Copy(h, f); err != nil {
-		return "", err
-	}
-
-	return fmt.Sprintf("%x", h.Sum(nil)), nil
+func hexdigest(h hash.Hash) string {
+	return fmt.Sprintf("%x", h.Sum(nil))
 }
 
 // Handle multipart file uploads.
 func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) {
-	// handle upload
-	err := r.ParseMultipartForm(0)
-	if err != nil {
-		log.WithError(err).Error("error parsing multipart form")
-	}
-
-	file, handler, err := r.FormFile("uploadfile")
-	if err != nil {
-		log.WithError(err).Error("missing upload file")
-		http.Error(w, "missing upload file", http.StatusBadRequest)
-		return
-	}
-	defer file.Close()
-
 	// stow wants the file size, but that's different from the
 	// content length, the content length being the size of the
 	// encoded file in the HTTP request. So we require an
@@ -95,38 +88,53 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 	expectedFileSHA256 := expectedFileSHA256s[0]
+	uploadName, ok := mux.Vars(r)["archiveID"]
 
-	_, err = file.Seek(0, io.SeekStart)
-	var digest string
-	if err == nil {
-		digest, err = sha256HexDigest(file)
-		if err == nil {
-			_, err = file.Seek(0, io.SeekStart)
-		}
-	}
+	mr, err := r.MultipartReader()
 	if err != nil {
-		log.WithError(err).Errorf("Error computing sha256 hexdigest")
-		http.Error(w, "Error computing sha256 hexdigest", http.StatusInternalServerError)
+		log.WithError(err).Error("error parsing multipart form")
+	}
+
+	var id string
+	var digest string
+	visitor := func(filename string, header textproto.MIMEHeader, reader io.Reader) (func() error, error) {
+		log.Infof("Handling upload for %v", filename)
+
+		if filename != "uploaded" {
+			return nil, fmt.Errorf("Unexpected file: %s", filename)
+		}
+
+		// TODO: allow headers to add more metadata (e.g. environment
+		// and function metadata)
+
+		hasher := sha256.New()
+		digestReader := io.TeeReader(reader, hasher)
+		id, err = ss.storageClient.putFile(digestReader, int64(fileSize), uploadName)
+		if err != nil {
+			return nil, err
+		}
+		digest = hexdigest(hasher)
+
+		return func() error { return ss.storageClient.removeFileByID(id) }, nil
+	}
+
+	err = multipartformdata.ReadForm(mr, visitor)
+	if err != nil {
+		log.WithError(err).Error("error parsing multipart form")
+		http.Error(w, "Error saving uploaded file", http.StatusInternalServerError)
+		return
+	}
+
+	// handle upload
+	if id == "" {
+		log.WithError(err).Error("missing upload file")
+		http.Error(w, "missing upload file", http.StatusBadRequest)
 		return
 	}
 
 	if digest != expectedFileSHA256 {
 		log.Errorf("Did not match expected X-File-Sha256 %s, got %s", expectedFileSHA256, digest)
 		http.Error(w, "Didn't match expected X-File-Sha256", http.StatusBadRequest)
-		return
-	}
-
-	// TODO: allow headers to add more metadata (e.g. environment
-	// and function metadata)
-	log.Infof("Handling upload for %v", handler.Filename)
-	//fileMetadata := make(map[string]interface{})
-	//fileMetadata["filename"] = handler.Filename
-
-	uploadName, ok := mux.Vars(r)["archiveID"]
-	id, err := ss.storageClient.putFile(file, int64(fileSize), uploadName)
-	if err != nil {
-		log.WithError(err).Error("Error saving uploaded file")
-		http.Error(w, "Error saving uploaded file", http.StatusInternalServerError)
 		return
 	}
 
@@ -194,6 +202,121 @@ func (ss *StorageService) downloadHandler(w http.ResponseWriter, r *http.Request
 	}
 }
 
+func uploadStatusForCounter(counter progress.Counter, size int64) UploadStatus {
+	var statusStr string
+	if counter.Err() == io.EOF {
+		statusStr = "done"
+	} else {
+		statusStr = "pending"
+	}
+
+	return UploadStatus{
+		Status: statusStr,
+		Size:   size,
+		N:      counter.N(),
+		Err:    counter.Err(),
+	}
+}
+
+func uploadStatusForProgress(progress progress.Progress) UploadStatus {
+	var statusStr string
+	if progress.Complete() {
+		statusStr = "done"
+	} else {
+		statusStr = "pending"
+	}
+
+	return UploadStatus{
+		Status: statusStr,
+		Size:   progress.Size(),
+		N:      progress.N(),
+	}
+}
+
+func (ss *StorageService) eventsHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from request
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, `{"error": "streaming not supported"}`, http.StatusInternalServerError)
+		return
+	}
+
+	fileId, err := ss.getIdFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	counter, size, err := ss.storageClient.status(fileId)
+	if err != nil {
+		if err == ErrNotFound {
+			http.Error(w, `{"error": "not found"}`, http.StatusNotFound)
+		} else if err == ErrRetrievingItem {
+			http.Error(w, `{"error": "bad request"}`, http.StatusBadRequest)
+		} else {
+			http.Error(w, fmt.Sprintf(`{"error": %#v}`, err.Error()), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	jsonEncoder := json.NewEncoder(w)
+	header := w.Header()
+	header.Set("Content-Type", "text/event-stream")
+	header.Set("Cache-Control", "no-cache")
+	header.Set("Connection", "keep-alive")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	progressChan := progress.NewTicker(ctx, counter, size, 1*time.Second)
+	for p := range progressChan {
+		_, err = io.WriteString(w, "event: status\ndata: ")
+		if err != nil {
+			break
+		}
+		err = jsonEncoder.Encode(uploadStatusForProgress(p))
+		if err != nil {
+			break
+		}
+		_, err = io.WriteString(w, "\n\n")
+		if err != nil {
+			break
+		}
+
+		flusher.Flush()
+	}
+
+	if err != nil {
+		log.WithError(err).Print("Error writing progress")
+	}
+}
+
+func (ss *StorageService) statusHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from request
+	fileId, err := ss.getIdFromRequest(r)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	counter, size, err := ss.storageClient.status(fileId)
+	if err != nil {
+		if err == ErrNotFound {
+			http.Error(w, `{"error": "not found"}`, http.StatusNotFound)
+		} else if err == ErrRetrievingItem {
+			http.Error(w, `{"error": "bad request"}`, http.StatusBadRequest)
+		} else {
+			http.Error(w, fmt.Sprintf(`{"error": %#v}`, err.Error()), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	status := uploadStatusForCounter(counter, size)
+	err = json.NewEncoder(w).Encode(status)
+	if err != nil {
+		log.WithError(err).Errorf("Error writing status '%#v'", status)
+	}
+}
+
 func (ss *StorageService) healthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
@@ -210,6 +333,8 @@ func (ss *StorageService) Start(port int) {
 	r.HandleFunc("/v1/archive", ss.uploadHandler).Methods("POST")
 	r.HandleFunc("/v1/archive/{archiveID}", ss.uploadHandler).Methods("POST")
 	r.HandleFunc("/v1/archive", ss.downloadHandler).Methods("GET")
+	r.HandleFunc("/v1/status", ss.statusHandler).Methods("GET")
+	r.HandleFunc("/v1/events", ss.eventsHandler).Methods("GET")
 	r.HandleFunc("/v1/archive", ss.deleteHandler).Methods("DELETE")
 	r.HandleFunc("/healthz", ss.healthHandler).Methods("GET")
 
