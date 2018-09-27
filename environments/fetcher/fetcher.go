@@ -63,36 +63,42 @@ func MakeFetcher(sharedVolumePath string, sharedSecretPath string, sharedConfigP
 	}, nil
 }
 
-func downloadUrl(url string, localPath string) error {
+func downloadUrl(url string, localPath string) (*fission.Checksum, error) {
 	resp, err := http.Get(url)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer resp.Body.Close()
 
 	w, err := os.Create(localPath)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer w.Close()
 
-	_, err = io.Copy(w, resp.Body)
+	hasher := sha256.New()
+	hashingReader := io.TeeReader(resp.Body, hasher)
+	nBytes, err := io.Copy(w, hashingReader)
 	if err != nil {
-		return err
+		log.Printf("Error while copying %s to file %s (after %d bytes): %s", url, localPath, nBytes, err)
+		return nil, err
 	}
 
 	// flushing write buffer to file
 	err = w.Sync()
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	err = os.Chmod(localPath, 0600)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
-	return nil
+	return &fission.Checksum{
+		Type: fission.ChecksumTypeSHA256,
+		Sum:  hex.EncodeToString(hasher.Sum(nil)),
+	}, nil
 }
 
 func getChecksum(path string) (*fission.Checksum, error) {
@@ -116,15 +122,11 @@ func getChecksum(path string) (*fission.Checksum, error) {
 	}, nil
 }
 
-func verifyChecksum(path string, checksum *fission.Checksum) error {
-	if checksum.Type != fission.ChecksumTypeSHA256 {
+func verifyChecksum(got, expect *fission.Checksum) error {
+	if got.Type != fission.ChecksumTypeSHA256 {
 		return fission.MakeError(fission.ErrorInvalidArgument, "Unsupported checksum type")
 	}
-	c, err := getChecksum(path)
-	if err != nil {
-		return err
-	}
-	if c.Sum != checksum.Sum {
+	if got.Sum != expect.Sum {
 		return fission.MakeError(fission.ErrorChecksumFail, "Checksum validation failed")
 	}
 	return nil
@@ -175,7 +177,6 @@ func (fetcher *Fetcher) FetchHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	log.Printf("fetcher received fetch request and started downloading: %v", req)
 	code, err := fetcher.Fetch(req)
 	if err != nil {
 		http.Error(w, err.Error(), code)
@@ -248,7 +249,7 @@ func (fetcher *Fetcher) Fetch(req fission.FunctionFetchRequest) (int, error) {
 
 	if req.FetchType == fission.FETCH_URL {
 		// fetch the file and save it to the tmp path
-		err := downloadUrl(req.Url, tmpPath)
+		_, err := downloadUrl(req.Url, tmpPath)
 		if err != nil {
 			e := fmt.Sprintf("Failed to download url %v: %v", req.Url, err)
 			log.Printf(e)
@@ -289,14 +290,14 @@ func (fetcher *Fetcher) Fetch(req fission.FunctionFetchRequest) (int, error) {
 			}
 		} else {
 			// download and verify
-			err = downloadUrl(archive.URL, tmpPath)
+			checksum, err := downloadUrl(archive.URL, tmpPath)
 			if err != nil {
 				e := fmt.Sprintf("Failed to download url %v: %v", req.Url, err)
 				log.Printf(e)
 				return http.StatusBadRequest, errors.New(e)
 			}
 
-			err = verifyChecksum(tmpPath, &archive.Checksum)
+			err = verifyChecksum(checksum, &archive.Checksum)
 			if err != nil {
 				e := fmt.Sprintf("Failed to verify checksum: %v", err)
 				log.Printf(e)
