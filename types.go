@@ -242,14 +242,14 @@ const (
 )
 
 const (
-	FissionBuilderSA = "fission-builder"
-	FissionFetcherSA = "fission-fetcher"
+	FissionBuilderSA = "system-fission-builder"
+	FissionFetcherSA = "system-fission-fetcher"
 
-	SecretConfigMapGetterCR = "secret-configmap-getter"
-	SecretConfigMapGetterRB = "secret-configmap-getter-binding"
+	SecretConfigMapGetterCR = "system-fission-secret-configmap-getter"
+	SecretConfigMapGetterRB = "system-fission-secret-configmap-getter-binding"
 
-	PackageGetterCR = "package-getter"
-	PackageGetterRB = "package-getter-binding"
+	PackageGetterCR = "system-fission-package-getter"
+	PackageGetterRB = "system-fission-package-getter-binding"
 
 	ClusterRole = "ClusterRole"
 )
