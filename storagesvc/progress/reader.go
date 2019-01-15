@@ -9,9 +9,10 @@ import (
 type Reader struct {
 	r io.Reader
 
-	lock sync.RWMutex // protects n and err
-	n    int64
-	err  error
+	lock  sync.RWMutex // protects n and err
+	n     int64
+	err   error
+	extra interface{}
 }
 
 // NewReader makes a new Reader that counts the bytes
@@ -20,6 +21,19 @@ func NewReader(r io.Reader) *Reader {
 	return &Reader{
 		r: r,
 	}
+}
+
+func (r *Reader) SetExtra(extra interface{}) {
+	r.lock.Lock()
+	r.extra = extra
+	r.lock.Unlock()
+}
+
+func (r *Reader) Extra() interface{} {
+	r.lock.RLock()
+	extra := r.extra
+	r.lock.RUnlock()
+	return extra
 }
 
 func (r *Reader) Read(p []byte) (n int, err error) {

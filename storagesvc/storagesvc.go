@@ -46,10 +46,11 @@ type (
 	}
 
 	UploadStatus struct {
-		Status string `json:"status"`
-		N      int64  `json:"n"`
-		Size   int64  `json:"size"`
-		Err    error  `json:"error,omitempty"`
+		Extra  interface{} `json:"extra"`
+		Status string      `json:"status"`
+		N      int64       `json:"n"`
+		Size   int64       `json:"size"`
+		Err    error       `json:"error,omitempty"`
 	}
 
 	UploadResponse struct {
@@ -208,6 +209,7 @@ func uploadStatusForCounter(counter progress.Counter, size int64) UploadStatus {
 	}
 
 	return UploadStatus{
+		Extra:  counter.Extra(),
 		Status: statusStr,
 		Size:   size,
 		N:      counter.N(),
@@ -224,6 +226,7 @@ func uploadStatusForProgress(progress progress.Progress) UploadStatus {
 	}
 
 	return UploadStatus{
+		Extra:  progress.Extra(),
 		Status: statusStr,
 		Size:   progress.Size(),
 		N:      progress.N(),
@@ -287,6 +290,38 @@ func (ss *StorageService) eventsHandler(w http.ResponseWriter, r *http.Request) 
 	}
 }
 
+func (ss *StorageService) setStatusExtraHandler(w http.ResponseWriter, r *http.Request) {
+	// get id from request
+	fileId, err := ss.getIdFromRequest(r)
+	if err != nil {
+		log.Println("error finding id for status extra", err.Error())
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	var extra interface{}
+	if err := json.NewDecoder(r.Body).Decode(&extra); err != nil {
+		log.Println("error decoding status extra", err.Error())
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	if err := ss.storageClient.setStatusExtra(fileId, extra); err != nil {
+		if err == ErrNotFound {
+			http.Error(w, `{"error": "not found"}`, http.StatusNotFound)
+		} else if err == ErrRetrievingItem {
+			http.Error(w, `{"error": "bad request"}`, http.StatusBadRequest)
+		} else {
+			log.Println("error setting status extra", err.Error())
+			http.Error(w, fmt.Sprintf(`{"error": %#v}`, err.Error()), http.StatusInternalServerError)
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	fmt.Fprint(w, `{"status": "ok"}`)
+}
+
 func (ss *StorageService) statusHandler(w http.ResponseWriter, r *http.Request) {
 	// get id from request
 	fileId, err := ss.getIdFromRequest(r)
@@ -331,6 +366,7 @@ func (ss *StorageService) Start(port int) {
 	r.HandleFunc("/v1/archive/{archiveID}", ss.uploadHandler).Methods("POST")
 	r.HandleFunc("/v1/archive", ss.downloadHandler).Methods("GET")
 	r.HandleFunc("/v1/status", ss.statusHandler).Methods("GET")
+	r.HandleFunc("/v1/status", ss.setStatusExtraHandler).Methods("POST")
 	r.HandleFunc("/v1/events", ss.eventsHandler).Methods("GET")
 	r.HandleFunc("/v1/archive", ss.deleteHandler).Methods("DELETE")
 	r.HandleFunc("/healthz", ss.healthHandler).Methods("GET")

@@ -31,6 +31,8 @@ import (
 // Counter counts bytes.
 // Both Reader and Writer are Counter types.
 type Counter interface {
+	Extra() interface{}
+
 	// N gets the current count value.
 	// For readers and writers, this is the number of bytes
 	// read or written.
@@ -47,6 +49,12 @@ type Progress struct {
 	size      float64
 	estimated time.Time
 	err       error
+	extra     interface{}
+}
+
+// Extra returns the current value of Extra.
+func (p Progress) Extra() interface{} {
+	return p.extra
 }
 
 // N gets the total number of bytes read or written
@@ -121,9 +129,10 @@ func NewTicker(ctx context.Context, counter Counter, size int64, d time.Duration
 				return
 			case <-time.After(d):
 				progress := Progress{
-					n:    float64(counter.N()),
-					size: float64(size),
-					err:  counter.Err(),
+					extra: counter.Extra(),
+					n:     float64(counter.N()),
+					size:  float64(size),
+					err:   counter.Err(),
 				}
 				ratio := progress.n / progress.size
 				past := float64(time.Since(started))

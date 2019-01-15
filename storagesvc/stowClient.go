@@ -27,7 +27,7 @@ import (
 	"github.com/fission/fission/storagesvc/progress"
 	"github.com/graymeta/stow"
 	_ "github.com/graymeta/stow/local"
-	"github.com/satori/go.uuid"
+	uuid "github.com/satori/go.uuid"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -138,8 +138,16 @@ func (cu completedUpload) N() int64 {
 	return int64(cu)
 }
 
+func (cu completedUpload) Extra() interface{} {
+	return nil
+}
+
 func (cu completedUpload) Err() error {
 	return io.EOF
+}
+
+func (client *StowClient) setStatusExtra(uploadName string, extra interface{}) error {
+	return client.uploads.setExtra(uploadName, extra)
 }
 
 func (client *StowClient) status(uploadName string) (progress.Counter, int64, error) {
