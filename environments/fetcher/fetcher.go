@@ -127,7 +127,7 @@ func verifyChecksum(got, expect *fission.Checksum) error {
 		return fission.MakeError(fission.ErrorInvalidArgument, "Unsupported checksum type")
 	}
 	if got.Sum != expect.Sum {
-		return fission.MakeError(fission.ErrorChecksumFail, "Checksum validation failed")
+		return fission.MakeError(fission.ErrorChecksumFail, "Checksum validation failed: "+got.Sum+" != "+expect.Sum)
 	}
 	return nil
 }
@@ -251,7 +251,7 @@ func (fetcher *Fetcher) Fetch(req fission.FunctionFetchRequest) (int, error) {
 		// fetch the file and save it to the tmp path
 		_, err := downloadUrl(req.Url, tmpPath)
 		if err != nil {
-			e := fmt.Sprintf("Failed to download url %v: %v", req.Url, err)
+			e := fmt.Sprintf("Failed to download url %#v %v: %v; %#v", req.Url, tmpPath, err, req)
 			log.Printf(e)
 			return http.StatusBadRequest, errors.New(e)
 		}
@@ -292,7 +292,7 @@ func (fetcher *Fetcher) Fetch(req fission.FunctionFetchRequest) (int, error) {
 			// download and verify
 			checksum, err := downloadUrl(archive.URL, tmpPath)
 			if err != nil {
-				e := fmt.Sprintf("Failed to download url %v: %v", req.Url, err)
+				e := fmt.Sprintf("Failed to download url %#v %v: %v", archive.URL, tmpPath, err)
 				log.Printf(e)
 				return http.StatusBadRequest, errors.New(e)
 			}
