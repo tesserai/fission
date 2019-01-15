@@ -67,27 +67,23 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 	// encoded file in the HTTP request. So we require an
 	// "X-File-Size" header in bytes.
 
+	var err error
+	fileSize := -1
 	fileSizeS, ok := r.Header["X-File-Size"]
-	if !ok {
-		log.Error("Missing X-File-Size")
-		http.Error(w, "missing X-File-Size header", http.StatusBadRequest)
-		return
-	}
-
-	fileSize, err := strconv.Atoi(fileSizeS[0])
-	if err != nil {
-		log.WithError(err).Errorf("Error parsing x-file-size: '%v'", fileSizeS)
-		http.Error(w, "missing or bad X-File-Size header", http.StatusBadRequest)
-		return
+	if ok {
+		fileSize, err = strconv.Atoi(fileSizeS[0])
+		if err != nil {
+			log.WithError(err).Errorf("Error parsing x-file-size: '%v'", fileSizeS)
+			http.Error(w, "bad X-File-Size header", http.StatusBadRequest)
+			return
+		}
 	}
 
 	expectedFileSHA256s, ok := r.Header["X-File-Sha256"]
-	if !ok {
-		log.Errorf("Missing X-File-Sha256")
-		http.Error(w, "missing X-File-Sha256 header", http.StatusBadRequest)
-		return
+	expectedFileSHA256 := ""
+	if ok {
+		expectedFileSHA256 = expectedFileSHA256s[0]
 	}
-	expectedFileSHA256 := expectedFileSHA256s[0]
 	uploadName, ok := mux.Vars(r)["archiveID"]
 
 	mr, err := r.MultipartReader()
@@ -132,7 +128,7 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if digest != expectedFileSHA256 {
+	if expectedFileSHA256 != "" && digest != expectedFileSHA256 {
 		log.Errorf("Did not match expected X-File-Sha256 %s, got %s", expectedFileSHA256, digest)
 		http.Error(w, "Didn't match expected X-File-Sha256", http.StatusBadRequest)
 		return
@@ -330,7 +326,7 @@ func MakeStorageService(storageClient *StowClient, port int) *StorageService {
 
 func (ss *StorageService) Start(port int) {
 	r := mux.NewRouter()
-	r.HandleFunc("/v1/archive", ss.uploadHandler).Methods("POST")
+	r.HandleFunc("/v1/archive", ss.uploadHandler).Queries("archiveID", "{archiveID}").Methods("POST")
 	r.HandleFunc("/v1/archive/{archiveID}", ss.uploadHandler).Methods("POST")
 	r.HandleFunc("/v1/archive", ss.downloadHandler).Methods("GET")
 	r.HandleFunc("/v1/status", ss.statusHandler).Methods("GET")
