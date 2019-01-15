@@ -20,6 +20,8 @@ import (
 	"context"
 	"log"
 	"net/http"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -115,11 +117,21 @@ func routerHealthHandler(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusOK)
 }
 
+func insertSortedFunctionHandler(many []*functionHandler, elt *functionHandler) []*functionHandler {
+	index := sort.Search(len(many), func(i int) bool {
+		return strings.Compare(many[i].httpTrigger.Spec.RelativeURL, elt.httpTrigger.Spec.RelativeURL) > 0
+	})
+	many = append(many, nil)
+	copy(many[index+1:], many[index:])
+	many[index] = elt
+	return many
+}
+
 func (ts *HTTPTriggerSet) getRouter() *mux.Router {
 	muxRouter := mux.NewRouter()
 
 	// HTTP triggers setup by the user
-	homeHandled := false
+	var functionHandlers []*functionHandler
 	for i := range ts.triggers {
 		trigger := ts.triggers[i]
 
@@ -172,17 +184,27 @@ func (ts *HTTPTriggerSet) getRouter() *mux.Router {
 			}
 		}
 
+		functionHandlers = insertSortedFunctionHandler(functionHandlers, fh)
+	}
+
+	homeHandled := false
+	for _, fh := range functionHandlers {
+		trigger := fh.httpTrigger
 		ht := muxRouter.HandleFunc(trigger.Spec.RelativeURL, fh.handler)
-		if trigger.Spec.Method != "" {
-			ht.Methods(trigger.Spec.Method)
+		method := trigger.Spec.Method
+		host := trigger.Spec.Host
+
+		if method != "" {
+			ht.Methods(method)
 		}
-		if trigger.Spec.Host != "" {
-			ht.Host(trigger.Spec.Host)
+		if host != "" {
+			ht.Host(host)
 		}
-		if trigger.Spec.RelativeURL == "/" && trigger.Spec.Method == "GET" || trigger.Spec.Method == "" {
+		if !homeHandled && host == "" && (trigger.Spec.RelativeURL == "/" && method == "GET" || method == "") {
 			homeHandled = true
 		}
 	}
+
 	if !homeHandled {
 		//
 		// This adds a no-op handler that returns 200-OK to make sure that the
