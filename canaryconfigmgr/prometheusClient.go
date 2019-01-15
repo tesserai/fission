@@ -22,27 +22,28 @@ import (
 
 	"golang.org/x/net/context"
 
-	promClient "github.com/prometheus/client_golang/api/prometheus"
+	promClientApi "github.com/prometheus/client_golang/api"
+	promClient "github.com/prometheus/client_golang/api/prometheus/v1"
 	"github.com/prometheus/common/model"
 	log "github.com/sirupsen/logrus"
 )
 
 type PrometheusApiClient struct {
-	client promClient.QueryAPI
+	client promClient.API
 }
 
 func MakePrometheusClient(prometheusSvc string) (*PrometheusApiClient, error) {
-	promApiConfig := promClient.Config{
+	promApiConfig := promClientApi.Config{
 		Address: prometheusSvc,
 	}
 
-	promApiClient, err := promClient.New(promApiConfig)
+	promApiClient, err := promClientApi.NewClient(promApiConfig)
 	if err != nil {
 		log.Errorf("Error creating prometheus api client for svc : %s, err : %v", prometheusSvc, err)
 		return nil, err
 	}
 
-	apiQueryClient := promClient.NewQueryAPI(promApiClient)
+	apiQueryClient := promClient.NewAPI(promApiClient)
 
 	// By default, the prometheus client library doesn't test server connectivity when creating
 	// prometheus client. As a workaround, here we send out a test query string to ensure that
