@@ -120,6 +120,9 @@ func deleteIngress(trigger *crd.HTTPTrigger, kubeClient *kubernetes.Clientset) {
 }
 
 func updateIngress(oldT *crd.HTTPTrigger, newT *crd.HTTPTrigger, kubeClient *kubernetes.Clientset) {
+	if !newT.Spec.CreateIngress && !oldT.Spec.CreateIngress {
+		return
+	}
 
 	if oldT.Spec.CreateIngress == false && newT.Spec.CreateIngress == true {
 		createIngress(newT, kubeClient)
