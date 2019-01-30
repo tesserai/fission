@@ -94,6 +94,9 @@ func MakeFetcherConfig(sharedMountPath string) (*Config, error) {
 		sharedMountPath:          sharedMountPath,
 		sharedSecretPath:         "/secrets",
 		sharedCfgMapPath:         "/configmaps",
+		dockerRegistryAuthDomain: os.Getenv("FETCHER_DOCKER_REGISTRY_AUTH_DOMAIN"),
+		dockerRegistryUsername:   os.Getenv("FETCHER_DOCKER_REGISTRY_USERNAME"),
+		dockerRegistryPassword:   os.Getenv("FETCHER_DOCKER_REGISTRY_PASSWORD"),
 		jaegerCollectorEndpoint:  os.Getenv("OPENCENSUS_TRACE_JAEGER_COLLECTOR_ENDPOINT"),
 		serviceAccount:           fission.FissionFetcherSA,
 	}, nil
@@ -169,6 +172,15 @@ func (cfg *Config) fetcherCommand(extraArgs ...string) []string {
 		"-secret-dir", cfg.sharedSecretPath,
 		"-cfgmap-dir", cfg.sharedCfgMapPath,
 		"-jaeger-collector-endpoint", cfg.jaegerCollectorEndpoint,
+	}
+	if cfg.dockerRegistryAuthDomain != "" {
+		command = append(command, "-docker-registry-auth-domain", cfg.dockerRegistryAuthDomain)
+	}
+	if cfg.dockerRegistryUsername != "" {
+		command = append(command, "-docker-registry-username", cfg.dockerRegistryUsername)
+	}
+	if cfg.dockerRegistryPassword != "" {
+		command = append(command, "-docker-registry-password", cfg.dockerRegistryPassword)
 	}
 
 	command = append(command, extraArgs...)

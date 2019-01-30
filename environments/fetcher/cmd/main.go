@@ -63,6 +63,10 @@ func main() {
 
 	flag.Usage = fetcherUsage
 	jaegerCollectorEndpoint := flag.String("jaeger-collector-endpoint", "", "")
+	dockerRegistryDefaultDomain := flag.String("docker-registry-default-domain", "registry-1.docker.io", "Docker registry domain to use when none is specified in image reference")
+	dockerRegistryAuthDomain := flag.String("docker-registry-auth-domain", "", "Docker registry domain that given username and password should be used for")
+	dockerRegistryUsername := flag.String("docker-registry-username", "", "Docker registry username to use for auth domain")
+	dockerRegistryPassword := flag.String("docker-registry-password", "", "Docker registry password to use for auth domain")
 	specializeOnStart := flag.Bool("specialize-on-startup", false, "Flag to activate specialize process at pod starup")
 	specializePayload := flag.String("specialize-request", "", "JSON payload for specialize request")
 	secretDir := flag.String("secret-dir", "", "Path to shared secrets directory")
@@ -88,7 +92,12 @@ func main() {
 		log.Fatalf("Could not register trace exporter: %v", err)
 	}
 
-	f, err := fetcher.MakeFetcher(dir, *secretDir, *configDir)
+	httpClient := &http.Client{
+		Transport: &ochttp.Transport{},
+	}
+	dockerBlobFetcher := fetcher.MakeDockerBlobFetcher(*dockerRegistryDefaultDomain, httpClient.Transport)
+	dockerBlobFetcher.SetBasicAuthForDomain(*dockerRegistryAuthDomain, *dockerRegistryUsername, *dockerRegistryPassword)
+	f, err := fetcher.MakeFetcher(dir, *secretDir, *configDir, httpClient, dockerBlobFetcher)
 	if err != nil {
 		log.Fatalf("Error making fetcher: %v", err)
 	}

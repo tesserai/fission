@@ -17,10 +17,11 @@ import (
 	"path/filepath"
 	"time"
 
+	"go.opencensus.io/trace"
+
 	"github.com/mholt/archiver"
 	"github.com/pkg/errors"
 	uuid "github.com/satori/go.uuid"
-	"go.opencensus.io/plugin/ochttp"
 	"golang.org/x/net/context/ctxhttp"
 	k8serr "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -39,6 +40,8 @@ type (
 		fissionClient    *crd.FissionClient
 		kubeClient       *kubernetes.Clientset
 		httpClient       *http.Client
+
+		dockerBlobFetcher *DockerBlobFetcher
 	}
 )
 
@@ -49,7 +52,7 @@ func makeVolumeDir(dirPath string) {
 	}
 }
 
-func MakeFetcher(sharedVolumePath string, sharedSecretPath string, sharedConfigPath string) (*Fetcher, error) {
+func MakeFetcher(sharedVolumePath string, sharedSecretPath string, sharedConfigPath string, httpClient *http.Client, dockerBlobFetcher *DockerBlobFetcher) (*Fetcher, error) {
 	makeVolumeDir(sharedVolumePath)
 	makeVolumeDir(sharedSecretPath)
 	makeVolumeDir(sharedConfigPath)
@@ -64,9 +67,9 @@ func MakeFetcher(sharedVolumePath string, sharedSecretPath string, sharedConfigP
 		sharedConfigPath: sharedConfigPath,
 		fissionClient:    fissionClient,
 		kubeClient:       kubeClient,
-		httpClient: &http.Client{
-			Transport: &ochttp.Transport{},
-		},
+		httpClient:       httpClient,
+
+		dockerBlobFetcher: dockerBlobFetcher,
 	}, nil
 }
 
@@ -298,7 +301,7 @@ func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequ
 				log.Printf(e)
 				return http.StatusInternalServerError, errors.New(e)
 			}
-		} else {
+		} else if len(archive.URL) > 0 {
 			// download and verify
 			checksum, err := downloadUrl(ctx, fetcher.httpClient, archive.URL, tmpPath)
 			if err != nil {
@@ -313,6 +316,15 @@ func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequ
 				log.Printf(e)
 				return http.StatusBadRequest, errors.New(e)
 			}
+		} else if len(archive.Image) > 0 {
+			err := fetcher.dockerBlobFetcher.DownloadFinalLayer(ctx, archive.Image, tmpPath)
+			if err != nil {
+				return http.StatusInternalServerError, err
+			}
+		} else {
+			e := fmt.Sprintf("Nothing to fetch")
+			log.Printf(e)
+			return http.StatusBadRequest, errors.New(e)
 		}
 	}
 

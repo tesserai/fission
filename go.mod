@@ -9,6 +9,7 @@ require (
 	github.com/coreos/etcd v0.0.0-20180813073948-f87b566248bb // indirect
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/dchest/uniuri v0.0.0-20160212164326-8902c56451e9
+	github.com/docker/distribution v2.7.1+incompatible
 	github.com/docker/spdystream v0.0.0-20160310174837-449fdfce4d96 // indirect
 	github.com/docopt/docopt-go v0.0.0-20160216232012-784ddc588536
 	github.com/dsnet/compress v0.0.0-20171208185109-cc9eb1d7ad76 // indirect
@@ -51,6 +52,7 @@ require (
 	github.com/nats-io/nats-streaming-server v0.10.2
 	github.com/nats-io/nuid v0.0.0-20180712044959-3024a71c3cbe // indirect
 	github.com/nwaples/rardecode v0.0.0-20171029023500-e06696f847ae // indirect
+	github.com/opencontainers/image-spec v1.0.1 // indirect
 	github.com/peterbourgon/diskv v2.0.1+incompatible // indirect
 	github.com/pierrec/lz4 v2.0.2+incompatible // indirect
 	github.com/pkg/errors v0.8.0

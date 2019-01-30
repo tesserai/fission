@@ -32,6 +32,9 @@ const (
 
 	// ArchiveTypeUrl means the package contents are at the specified URL.
 	ArchiveTypeUrl ArchiveType = "url"
+
+	// ArchiveTypeImage means that the package contents are a Docker image layer
+	ArchiveTypeImage ArchiveType = "image"
 )
 
 const (

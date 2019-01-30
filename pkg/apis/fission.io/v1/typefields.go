@@ -56,6 +56,8 @@ type (
 		// URL references a package.
 		URL string `json:"url,omitempty"`
 
+		Image string `json:"image,omitempty"`
+
 		// Checksum ensures the integrity of packages
 		// refereced by URL. Ignored for literals.
 		Checksum Checksum `json:"checksum,omitempty"`
