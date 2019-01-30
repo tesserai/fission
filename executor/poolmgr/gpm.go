@@ -31,6 +31,7 @@ import (
 
 	"github.com/fission/fission"
 	"github.com/fission/fission/crd"
+	fetcherConfig "github.com/fission/fission/environments/fetcher/config"
 	"github.com/fission/fission/executor/fscache"
 	"github.com/fission/fission/executor/reaper"
 )
@@ -53,8 +54,8 @@ type (
 		instanceId     string
 		requestChannel chan *request
 
-		enableIstio             bool
-		jaegerCollectorEndpoint string
+		enableIstio   bool
+		fetcherConfig *fetcherConfig.Config
 
 		funcStore      k8sCache.Store
 		funcController k8sCache.Controller
@@ -80,18 +81,19 @@ func MakeGenericPoolManager(
 	kubernetesClient *kubernetes.Clientset,
 	functionNamespace string,
 	fsCache *fscache.FunctionServiceCache,
+	fetcherConfig *fetcherConfig.Config,
 	instanceId string) *GenericPoolManager {
 
 	gpm := &GenericPoolManager{
-		pools:                   make(map[string]*GenericPool),
-		kubernetesClient:        kubernetesClient,
-		namespace:               functionNamespace,
-		fissionClient:           fissionClient,
-		fsCache:                 fsCache,
-		instanceId:              instanceId,
-		requestChannel:          make(chan *request),
-		idlePodReapTime:         2 * time.Minute,
-		jaegerCollectorEndpoint: os.Getenv("OPENCENSUS_TRACE_JAEGER_COLLECTOR_ENDPOINT"),
+		pools:            make(map[string]*GenericPool),
+		kubernetesClient: kubernetesClient,
+		namespace:        functionNamespace,
+		fissionClient:    fissionClient,
+		fsCache:          fsCache,
+		fetcherConfig:    fetcherConfig,
+		instanceId:       instanceId,
+		requestChannel:   make(chan *request),
+		idlePodReapTime:  2 * time.Minute,
 	}
 	go gpm.service()
 	go gpm.eagerPoolCreator()
@@ -142,8 +144,7 @@ func (gpm *GenericPoolManager) service() {
 
 				pool, err = MakeGenericPool(
 					gpm.fissionClient, gpm.kubernetesClient, req.env, poolsize,
-					ns, gpm.namespace, gpm.fsCache, gpm.instanceId, gpm.enableIstio,
-					gpm.jaegerCollectorEndpoint)
+					ns, gpm.namespace, gpm.fsCache, gpm.fetcherConfig, gpm.instanceId, gpm.enableIstio)
 				if err != nil {
 					req.responseChannel <- &response{error: err}
 					continue
