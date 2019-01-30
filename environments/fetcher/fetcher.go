@@ -77,7 +77,7 @@ func downloadUrl(ctx context.Context, httpClient *http.Client, url string, local
 	}
 	defer resp.Body.Close()
 
-	w, err := os.Create(localPath)
+	w, err := os.OpenFile(localPath, os.O_WRONLY|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -93,11 +93,6 @@ func downloadUrl(ctx context.Context, httpClient *http.Client, url string, local
 
 	// flushing write buffer to file
 	err = w.Sync()
-	if err != nil {
-		return nil, err
-	}
-
-	err = os.Chmod(localPath, 0600)
 	if err != nil {
 		return nil, err
 	}
@@ -157,6 +152,14 @@ func (fetcher *Fetcher) VersionHandler(w http.ResponseWriter, r *http.Request) {
 	fmt.Fprintf(w, fission.BuildInfo().String())
 }
 
+func httpError(w http.ResponseWriter, r *http.Request, err error, code int) {
+	span := trace.FromContext(r.Context())
+	span.AddAttributes(
+		trace.StringAttribute("error", err.Error()),
+	)
+	http.Error(w, err.Error(), code)
+}
+
 func (fetcher *Fetcher) FetchHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != "POST" {
 		http.Error(w, "only POST is supported on this endpoint", http.StatusMethodNotAllowed)
@@ -173,27 +176,27 @@ func (fetcher *Fetcher) FetchHandler(w http.ResponseWriter, r *http.Request) {
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 	var req fission.FunctionFetchRequest
 	err = json.Unmarshal(body, &req)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
-	code, err := fetcher.Fetch(r.Context(), req)
+	code, err := fetcher.Fetch(r.Context(), req, filepath.Join(fetcher.sharedVolumePath, req.Filename))
 	if err != nil {
-		http.Error(w, err.Error(), code)
+		httpError(w, r, err, code)
 		return
 	}
 
 	log.Printf("Checking secrets/cfgmaps")
 	code, err = fetcher.FetchSecretsAndCfgMaps(req.Secrets, req.ConfigMaps)
 	if err != nil {
-		http.Error(w, err.Error(), code)
+		httpError(w, r, err, code)
 		return
 	}
 
@@ -212,14 +215,14 @@ func (fetcher *Fetcher) SpecializeHandler(w http.ResponseWriter, r *http.Request
 	body, err := ioutil.ReadAll(r.Body)
 	if err != nil {
 		log.Printf("Error reading request body")
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		httpError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 	var req fission.FunctionSpecializeRequest
 	err = json.Unmarshal(body, &req)
 	if err != nil {
 		log.Printf("Error reading request body: %v", err)
-		http.Error(w, err.Error(), http.StatusBadRequest)
+		httpError(w, r, err, http.StatusBadRequest)
 		return
 	}
 
@@ -227,7 +230,8 @@ func (fetcher *Fetcher) SpecializeHandler(w http.ResponseWriter, r *http.Request
 
 	err = fetcher.SpecializePod(r.Context(), req.FetchReq, req.LoadReq)
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
+		log.Printf("Error specializing: %#v %v", req, err)
+		httpError(w, r, err, http.StatusInternalServerError)
 		return
 	}
 
@@ -237,7 +241,7 @@ func (fetcher *Fetcher) SpecializeHandler(w http.ResponseWriter, r *http.Request
 
 // Fetch takes FetchRequest and makes the fetch call
 // It returns the HTTP code and error if any
-func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequest) (int, error) {
+func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequest, destPath string) (int, error) {
 	// check that the requested filename is not an empty string and error out if so
 	if len(req.Filename) == 0 {
 		e := fmt.Sprintf("Fetch request received for an empty file name, request: %v", req)
@@ -246,19 +250,18 @@ func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequ
 	}
 
 	// verify first if the file already exists.
-	if _, err := os.Stat(filepath.Join(fetcher.sharedVolumePath, req.Filename)); err == nil {
-		log.Printf("Requested file: %s already exists at %s. Skipping fetch", req.Filename, fetcher.sharedVolumePath)
+	if _, err := os.Stat(destPath); err == nil {
+		log.Printf("Requested file: %s already exists. Skipping fetch", destPath)
 		return http.StatusOK, nil
 	}
 
-	tmpFile := req.Filename + ".tmp"
-	tmpPath := filepath.Join(fetcher.sharedVolumePath, tmpFile)
+	tmpPath := destPath + ".tmp"
 
 	if req.FetchType == fission.FETCH_URL {
 		// fetch the file and save it to the tmp path
 		_, err := downloadUrl(ctx, fetcher.httpClient, req.Url, tmpPath)
 		if err != nil {
-			e := fmt.Sprintf("Failed to download url %#v %v: %v; %#v", req.Url, tmpPath, err, req)
+			e := fmt.Sprintf("Failed to download url %s %v: %v; %#v", req.Url, tmpPath, err, req)
 			log.Printf(e)
 			return http.StatusBadRequest, errors.New(e)
 		}
@@ -313,26 +316,33 @@ func (fetcher *Fetcher) Fetch(ctx context.Context, req fission.FunctionFetchRequ
 		}
 	}
 
-	if archiver.Zip.Match(tmpPath) && !req.KeepArchive {
-		// unarchive tmp file to a tmp unarchive path
-		tmpUnarchivePath := filepath.Join(fetcher.sharedVolumePath, uuid.NewV4().String())
-		err := fetcher.unarchive(tmpPath, tmpUnarchivePath)
-		if err != nil {
-			log.Println(err.Error())
-			return http.StatusInternalServerError, err
+	if !req.KeepArchive {
+		var useArchiver archiver.Archiver
+		if archiver.Zip.Match(tmpPath) {
+			useArchiver = archiver.Zip
 		}
 
-		tmpPath = tmpUnarchivePath
+		if useArchiver != nil {
+			// unarchive tmp file to a tmp unarchive path
+			tmpUnarchivePath := filepath.Join(fetcher.sharedVolumePath, uuid.NewV4().String())
+			err := fetcher.unarchive(useArchiver, tmpPath, tmpUnarchivePath)
+			if err != nil {
+				log.Println(err.Error())
+				return http.StatusInternalServerError, err
+			}
+
+			tmpPath = tmpUnarchivePath
+		}
 	}
 
 	// move tmp file to requested filename
-	err := fetcher.rename(tmpPath, filepath.Join(fetcher.sharedVolumePath, req.Filename))
+	err := fetcher.rename(tmpPath, destPath)
 	if err != nil {
 		log.Println(err.Error())
 		return http.StatusInternalServerError, err
 	}
 
-	log.Printf("Successfully placed at %v", filepath.Join(fetcher.sharedVolumePath, req.Filename))
+	log.Printf("Successfully placed at %v", destPath)
 	return http.StatusOK, nil
 }
 
@@ -526,8 +536,8 @@ func (fetcher *Fetcher) archive(src string, dst string) error {
 }
 
 // unarchive is a function that unzips a zip file to destination
-func (fetcher *Fetcher) unarchive(src string, dst string) error {
-	err := archiver.Zip.Open(src, dst)
+func (fetcher *Fetcher) unarchive(useArchiver archiver.Archiver, src string, dst string) error {
+	err := useArchiver.Open(src, dst)
 	if err != nil {
 		return errors.New(fmt.Sprintf("Failed to unzip file: %v", err))
 	}
@@ -541,7 +551,7 @@ func (fetcher *Fetcher) SpecializePod(ctx context.Context, fetchReq fission.Func
 		log.Printf("Elapsed time in fetch request = %v", elapsed)
 	}()
 
-	_, err := fetcher.Fetch(ctx, fetchReq)
+	_, err := fetcher.Fetch(ctx, fetchReq, loadReq.FilePath)
 	if err != nil {
 		return errors.Wrap(err, "Error fetching deploy package")
 	}
@@ -574,7 +584,7 @@ func (fetcher *Fetcher) SpecializePod(ctx context.Context, fetchReq fission.Func
 	}
 
 	for i := 0; i < maxRetries; i++ {
-		resp, err := http.Post(specializeURL, contentType, reader)
+		resp, err := ctxhttp.Post(ctx, fetcher.httpClient, specializeURL, contentType, reader)
 		if err == nil && resp.StatusCode < 300 {
 			// Success
 			resp.Body.Close()
