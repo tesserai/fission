@@ -3,6 +3,7 @@ package main
 import (
 	"flag"
 	"fmt"
+	"io/ioutil"
 	"log"
 	"os"
 	"strconv"
@@ -61,15 +62,10 @@ func runMessageQueueMgr(routerUrl string) {
 	}
 }
 
-func runStorageSvc(port int, filePath string) {
-	subdir := os.Getenv("SUBDIR")
-	if len(subdir) == 0 {
-		subdir = "fission-functions"
-	}
+func runStorageSvc(port int, readWriteConfig map[string]string, readOnlyConfigs []map[string]string) {
 	enableArchivePruner := true
 
-	err := storagesvc.RunStorageService(storagesvc.StorageTypeLocal,
-		filePath, subdir, port, enableArchivePruner)
+	err := storagesvc.RunStorageService(port, enableArchivePruner, readWriteConfig, readOnlyConfigs)
 	if err != nil {
 		log.Fatalf("Error starting storage service: %v", err)
 	}
@@ -180,6 +176,7 @@ Usage:
   fission-bundle --executorPort=<port> [--namespace=<namespace>] [--fission-namespace=<namespace>] [--jaegerCollectorEndpoint=<url>]
   fission-bundle --kubewatcher [--routerUrl=<url>] [--jaegerCollectorEndpoint=<url>]
   fission-bundle --storageServicePort=<port> --filePath=<filePath> [--jaegerCollectorEndpoint=<url>]
+  fission-bundle --storageServicePort=<port> [--read-write=<provider>] [--local=<path> --local-subdir=<subdir>] [--gcs-bucket=<bucket> --gcs-json-file=<path> --gcs-project=<project>] [--jaegerCollectorEndpoint=<url>]
   fission-bundle --builderMgr [--storageSvcUrl=<url>] [--envbuilder-namespace=<namespace>] [--jaegerCollectorEndpoint=<url>]
   fission-bundle --timer [--routerUrl=<url>] [--jaegerCollectorEndpoint=<url>]
   fission-bundle --mqt   [--routerUrl=<url>] [--jaegerCollectorEndpoint=<url>]
@@ -254,8 +251,62 @@ Options:
 
 	if arguments["--storageServicePort"] != nil {
 		port := getPort(arguments["--storageServicePort"])
-		filePath := arguments["--filePath"].(string)
-		runStorageSvc(port, filePath)
+		var gcsConfig map[string]string
+		var localConfig map[string]string
+
+		filePath := arguments["--local"].(string)
+		if filePath == "" {
+			filePath = arguments["--filePath"].(string)
+		}
+
+		subdir := arguments["--local-subdir"].(string)
+		if subdir == "" {
+			subdir = os.Getenv("SUBDIR")
+			if subdir == "" {
+				subdir = "fission-functions"
+			}
+		}
+
+		if filePath != "" {
+			localConfig = map[string]string{
+				storagesvc.ConfigLocalKeyPath: filePath,
+				storagesvc.ConfigContainer:    subdir,
+			}
+		}
+
+		gcsJSONFile := arguments["--gcs-json-file"].(string)
+		if gcsJSONFile != "" {
+			gcsJSON, err := ioutil.ReadFile(gcsJSONFile)
+			if err != nil {
+				log.Fatalf("Error reading GCS JSON file %s: %v", gcsJSONFile, err)
+			}
+			gcsConfig = map[string]string{
+				storagesvc.ConfigContainer:    arguments["--gcs-bucket"].(string),
+				storagesvc.ConfigGCSJSON:      string(gcsJSON),
+				storagesvc.ConfigGCSProjectId: arguments["--gcs-project"].(string),
+			}
+		}
+
+		readWriteProvider := arguments["--read-write"].(string)
+		if readWriteProvider == "" {
+			readWriteProvider = "local"
+		}
+
+		var readWriteConfig map[string]string
+		var readOnlyConfigs []map[string]string
+
+		switch readWriteProvider {
+		case "local":
+			readWriteConfig = localConfig
+			readOnlyConfigs = append(readOnlyConfigs, gcsConfig)
+		case "gcs":
+			readWriteConfig = gcsConfig
+			readOnlyConfigs = append(readOnlyConfigs, localConfig)
+		default:
+			log.Fatalf("Invalid value for --read-write: %s", readWriteProvider)
+		}
+
+		runStorageSvc(port, readWriteConfig, readOnlyConfigs)
 	}
 
 	select {}

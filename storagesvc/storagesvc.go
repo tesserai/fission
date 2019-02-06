@@ -26,17 +26,32 @@ import (
 	"net/http"
 	"net/textproto"
 	"os"
+	"path/filepath"
 	"strconv"
 	"time"
+
+	"github.com/gorilla/mux"
+	"github.com/graymeta/stow"
+	"github.com/graymeta/stow/google"
+	"github.com/graymeta/stow/local"
+	"github.com/pkg/errors"
+	log "github.com/sirupsen/logrus"
+	"go.opencensus.io/plugin/ochttp"
 
 	"github.com/fission/fission"
 	"github.com/fission/fission/storagesvc/multipartformdata"
 	"github.com/fission/fission/storagesvc/progress"
-	"github.com/gorilla/mux"
-	_ "github.com/graymeta/stow/local"
-	"github.com/pkg/errors"
-	log "github.com/sirupsen/logrus"
-	"go.opencensus.io/plugin/ochttp"
+)
+
+const (
+	ConfigProvider  = "fission/storagesvc/provider"
+	ConfigContainer = "fission/storagesvc/container"
+
+	ConfigLocalKeyPath = local.ConfigKeyPath
+
+	ConfigGCSJSON      = google.ConfigJSON
+	ConfigGCSProjectId = google.ConfigProjectId
+	ConfigGCSScopes    = google.ConfigScopes
 )
 
 type (
@@ -93,7 +108,6 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 		log.WithError(err).Error("error parsing multipart form")
 	}
 
-	var id string
 	var digest string
 	visitor := func(filename string, header textproto.MIMEHeader, reader io.Reader) (func() error, error) {
 		log.Infof("Handling upload for %v", filename)
@@ -107,13 +121,13 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 
 		hasher := sha256.New()
 		digestReader := io.TeeReader(reader, hasher)
-		id, err = ss.storageClient.putFile(digestReader, int64(fileSize), uploadName)
+		_, err = ss.storageClient.putFile(digestReader, int64(fileSize), uploadName)
 		if err != nil {
 			return nil, err
 		}
 		digest = hexdigest(hasher)
 
-		return func() error { return ss.storageClient.removeFileByID(id) }, nil
+		return func() error { return ss.storageClient.removeFileByID(uploadName) }, nil
 	}
 
 	err = multipartformdata.ReadForm(mr, visitor)
@@ -124,7 +138,7 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 	}
 
 	// handle upload
-	if id == "" {
+	if digest == "" {
 		log.WithError(err).Error("missing upload file")
 		http.Error(w, "missing upload file", http.StatusBadRequest)
 		return
@@ -138,7 +152,7 @@ func (ss *StorageService) uploadHandler(w http.ResponseWriter, r *http.Request) 
 
 	// respond with an ID that can be used to retrieve the file
 	ur := &UploadResponse{
-		ID: id,
+		ID: uploadName,
 	}
 	resp, err := json.Marshal(ur)
 	if err != nil {
@@ -154,7 +168,9 @@ func (ss *StorageService) getIdFromRequest(r *http.Request) (string, error) {
 	if !ok || len(ids) == 0 {
 		return "", errors.New("Missing `id' query param")
 	}
-	return ids[0], nil
+
+	id := ids[0]
+	return filepath.Base(id), nil
 }
 
 func (ss *StorageService) deleteHandler(w http.ResponseWriter, r *http.Request) {
@@ -353,6 +369,13 @@ func (ss *StorageService) healthHandler(w http.ResponseWriter, r *http.Request) 
 	w.WriteHeader(http.StatusOK)
 }
 
+func resolveContainerFromConfig(config map[string]string) (stow.Container, error) {
+	provider := config[ConfigProvider]
+	containerName := config[ConfigContainer]
+
+	return ResolveContainer(provider, containerName, config)
+}
+
 func MakeStorageService(storageClient *StowClient, port int) *StorageService {
 	return &StorageService{
 		storageClient: storageClient,
@@ -382,7 +405,7 @@ func (ss *StorageService) Start(port int) error {
 	return err
 }
 
-func RunStorageService(storageType StorageType, storagePath string, containerName string, port int, enablePruner bool) error {
+func RunStorageService(port int, enablePruner bool, readWriteConfig map[string]string, readOnlyConfigs []map[string]string) error {
 	// setup a signal handler for SIGTERM
 	fission.SetupStackTraceHandler()
 
@@ -390,10 +413,20 @@ func RunStorageService(storageType StorageType, storagePath string, containerNam
 	log.SetLevel(log.InfoLevel)
 
 	// create a storage client
-	storageClient, err := MakeStowClient(storageType, storagePath, containerName)
+	readWriteContainer, err := resolveContainerFromConfig(readWriteConfig)
 	if err != nil {
 		return err
 	}
+	readOnlyContainers := []stow.Container{}
+	for _, readOnlyConfig := range readOnlyConfigs {
+		readOnlyContainer, err := resolveContainerFromConfig(readOnlyConfig)
+		if err != nil {
+			return err
+		}
+		readOnlyContainers = append(readOnlyContainers, readOnlyContainer)
+	}
+
+	storageClient := MakeStowClient(readWriteContainer, readOnlyContainers...)
 
 	// create http handlers
 	storageService := MakeStorageService(storageClient, port)

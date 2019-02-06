@@ -21,8 +21,9 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
+
+	multierror "github.com/hashicorp/go-multierror"
 
 	"github.com/fission/fission/storagesvc/progress"
 	"github.com/graymeta/stow"
@@ -32,26 +33,16 @@ import (
 )
 
 type (
-	StorageType string
-
-	storageConfig struct {
-		storageType   StorageType
-		localPath     string
-		containerName string
-		// other stuff, such as google or s3 credentials, bucket names etc
-	}
-
 	StowClient struct {
-		config    *storageConfig
-		location  stow.Location
-		container stow.Container
-		uploads   *UploadRegistry
+		writeContainer stow.Container
+
+		readContainers []stow.Container
+		uploads        *UploadRegistry
 	}
 )
 
 const (
-	StorageTypeLocal StorageType = "local"
-	PaginationSize   int         = 10
+	PaginationSize int = 10
 )
 
 var (
@@ -62,37 +53,20 @@ var (
 	ErrWritingFileIntoResponse = errors.New("unable to copy item into http response")
 )
 
-func MakeStowClient(storageType StorageType, storagePath string, containerName string) (*StowClient, error) {
-	if storageType != StorageTypeLocal {
-		return nil, errors.New("Storage types other than 'local' are not implemented")
-	}
-
-	config := &storageConfig{
-		storageType:   storageType,
-		localPath:     storagePath,
-		containerName: containerName,
-	}
-
-	stowClient := &StowClient{
-		config:  config,
-		uploads: NewUploadRegistry(),
-	}
-
-	cfg := stow.ConfigMap{"path": config.localPath}
-	loc, err := stow.Dial("local", cfg)
+func ResolveContainer(provider, containerName string, cfg stow.ConfigMap) (stow.Container, error) {
+	loc, err := stow.Dial(provider, cfg)
 	if err != nil {
 		log.WithError(err).Error("Error initializing storage")
 		return nil, err
 	}
-	stowClient.location = loc
 
-	con, err := loc.CreateContainer(config.containerName)
+	con, err := loc.CreateContainer(containerName)
 	if os.IsExist(err) {
 		var cons []stow.Container
 		var cursor string
 
 		// use location.Containers to find containers that match the prefix (container name)
-		cons, cursor, err = loc.Containers(config.containerName, stow.CursorStart, 1)
+		cons, cursor, err = loc.Containers(containerName, stow.CursorStart, 1)
 		if err == nil {
 			if !stow.IsCursorEnd(cursor) {
 				// Should only have one storage container
@@ -106,9 +80,16 @@ func MakeStowClient(storageType StorageType, storagePath string, containerName s
 		log.WithError(err).Error("Error initializing storage")
 		return nil, err
 	}
-	stowClient.container = con
+	return con, nil
+}
 
-	return stowClient, nil
+func MakeStowClient(readWriteContainer stow.Container, readOnlyContainers ...stow.Container) *StowClient {
+	return &StowClient{
+		writeContainer: readWriteContainer,
+		readContainers: append([]stow.Container{readWriteContainer}, readOnlyContainers...),
+
+		uploads: NewUploadRegistry(),
+	}
 }
 
 // putFile writes the file on the storage
@@ -122,7 +103,7 @@ func (client *StowClient) putFile(reader io.Reader, fileSize int64, uploadName s
 	r := client.uploads.declare(uploadName, fileSize, reader)
 	defer client.uploads.remove(uploadName, r)
 
-	item, err := client.container.Put(uploadName, r, int64(fileSize), nil)
+	item, err := client.writeContainer.Put(uploadName, r, int64(fileSize), nil)
 	if err != nil {
 		log.WithError(err).Errorf("Error writing file: %s on storage, size %d", uploadName, fileSize)
 		return "", ErrWritingFile
@@ -150,6 +131,25 @@ func (client *StowClient) setStatusExtra(uploadName string, extra interface{}) e
 	return client.uploads.setExtra(uploadName, extra)
 }
 
+func (client *StowClient) findItemForUploadName(uploadName string) (stow.Container, stow.Item, error) {
+	merr := &multierror.Error{}
+	for _, container := range client.readContainers {
+		itemID := filepath.Join(container.ID(), uploadName)
+
+		item, err := container.Item(itemID)
+		if err == nil {
+			return container, item, nil
+		}
+		if err != stow.ErrNotFound {
+			merr.Errors = append(merr.Errors, err)
+		}
+	}
+
+	merr.Errors = append(merr.Errors, stow.ErrNotFound)
+
+	return nil, nil, merr.ErrorOrNil()
+}
+
 func (client *StowClient) status(uploadName string) (progress.Counter, int64, error) {
 	counter, size := client.uploads.get(uploadName)
 
@@ -157,18 +157,7 @@ func (client *StowClient) status(uploadName string) (progress.Counter, int64, er
 		return counter, size, nil
 	}
 
-	// HACK(adamb) Delete this uploadName -> itemID logic once any of:
-	//     1) we stop using stow's local backend
-	//     2) https://github.com/graymeta/stow/issues/170 is closed
-	//     3) https://github.com/graymeta/stow/pull/175 is merged
-	var itemID string
-	if strings.HasPrefix(uploadName, "/") {
-		itemID = uploadName
-	} else {
-		itemID = filepath.Join(client.container.ID(), uploadName)
-	}
-
-	item, err := client.container.Item(itemID)
+	_, item, err := client.findItemForUploadName(uploadName)
 	if err != nil {
 		if err == stow.ErrNotFound {
 			return nil, -1, ErrNotFound
@@ -186,8 +175,8 @@ func (client *StowClient) status(uploadName string) (progress.Counter, int64, er
 }
 
 // copyFileToStream gets the file contents into a stream
-func (client *StowClient) copyFileToStream(fileId string, w io.Writer) error {
-	item, err := client.container.Item(fileId)
+func (client *StowClient) copyFileToStream(uploadName string, w io.Writer) error {
+	item, err := client.writeContainer.Item(uploadName)
 	if err != nil {
 		if err == stow.ErrNotFound {
 			return ErrNotFound
@@ -204,17 +193,21 @@ func (client *StowClient) copyFileToStream(fileId string, w io.Writer) error {
 
 	_, err = io.Copy(w, f)
 	if err != nil {
-		log.WithError(err).Printf("Error copying file: %s into httpresponse", fileId)
+		log.WithError(err).Printf("Error copying file: %s into httpresponse", uploadName)
 		return ErrWritingFileIntoResponse
 	}
 
-	log.Debugf("successfully wrote file: %s into httpresponse", fileId)
+	log.Debugf("successfully wrote file: %s into httpresponse", uploadName)
 	return nil
 }
 
 // removeFileByID deletes the file from storage
-func (client *StowClient) removeFileByID(itemID string) error {
-	return client.container.RemoveItem(itemID)
+func (client *StowClient) removeFileByID(uploadName string) error {
+	container, _, err := client.findItemForUploadName(uploadName)
+	if err != nil {
+		return err
+	}
+	return container.RemoveItem(uploadName)
 }
 
 // filter defines an interface to filter out items from a set of items
@@ -229,7 +222,7 @@ func (client *StowClient) getItemIDsWithFilter(filterFunc filter, filterFuncPara
 	archiveIDList := make([]string, 0)
 
 	for {
-		items, cursor, err = client.container.Items(stow.NoPrefix, cursor, PaginationSize)
+		items, cursor, err = client.writeContainer.Items(stow.NoPrefix, cursor, PaginationSize)
 		if err != nil {
 			log.WithError(err).Error("Error getting items from container")
 			return nil, err
