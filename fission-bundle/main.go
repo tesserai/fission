@@ -67,8 +67,12 @@ func runStorageSvc(port int, filePath string) {
 		subdir = "fission-functions"
 	}
 	enableArchivePruner := true
-	storagesvc.RunStorageService(storagesvc.StorageTypeLocal,
+
+	err := storagesvc.RunStorageService(storagesvc.StorageTypeLocal,
 		filePath, subdir, port, enableArchivePruner)
+	if err != nil {
+		log.Fatalf("Error starting storage service: %v", err)
+	}
 }
 
 func runBuilderMgr(storageSvcUrl string, envBuilderNamespace string) {

@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"hash"
 	"io"
@@ -35,6 +34,7 @@ import (
 	"github.com/fission/fission/storagesvc/progress"
 	"github.com/gorilla/mux"
 	_ "github.com/graymeta/stow/local"
+	"github.com/pkg/errors"
 	log "github.com/sirupsen/logrus"
 	"go.opencensus.io/plugin/ochttp"
 )
@@ -360,7 +360,7 @@ func MakeStorageService(storageClient *StowClient, port int) *StorageService {
 	}
 }
 
-func (ss *StorageService) Start(port int) {
+func (ss *StorageService) Start(port int) error {
 	r := mux.NewRouter()
 	r.HandleFunc("/v1/archive", ss.uploadHandler).Queries("archiveID", "{archiveID}").Methods("POST")
 	r.HandleFunc("/v1/archive/{archiveID}", ss.uploadHandler).Methods("POST")
@@ -379,10 +379,10 @@ func (ss *StorageService) Start(port int) {
 		// Propagation: &b3.HTTPFormat{},
 	})
 
-	log.Fatal(err)
+	return err
 }
 
-func RunStorageService(storageType StorageType, storagePath string, containerName string, port int, enablePruner bool) *StorageService {
+func RunStorageService(storageType StorageType, storagePath string, containerName string, port int, enablePruner bool) error {
 	// setup a signal handler for SIGTERM
 	fission.SetupStackTraceHandler()
 
@@ -392,12 +392,11 @@ func RunStorageService(storageType StorageType, storagePath string, containerNam
 	// create a storage client
 	storageClient, err := MakeStowClient(storageType, storagePath, containerName)
 	if err != nil {
-		log.Fatalf("Error creating stowClient: %v", err)
+		return err
 	}
 
 	// create http handlers
 	storageService := MakeStorageService(storageClient, port)
-	go storageService.Start(port)
 
 	// enablePruner prevents storagesvc unit test from needing to talk to kubernetes
 	if enablePruner {
@@ -408,11 +407,13 @@ func RunStorageService(storageType StorageType, storagePath string, containerNam
 		}
 		pruner, err := MakeArchivePruner(storageClient, time.Duration(pruneInterval))
 		if err != nil {
-			log.Fatalf("Error creating archivePruner: %v", err)
+			return errors.Wrap(err, "Error creating archivePruner")
 		}
 		go pruner.Start()
 	}
 
-	log.Info("Storage service started")
-	return storageService
+	log.Info("Starting storage service...")
+	storageService.Start(port)
+
+	return nil
 }
