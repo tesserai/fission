@@ -1,7 +1,7 @@
 module github.com/fission/fission/pkg/apis/fission.io
 
 require (
-	github.com/Azure/go-autorest v10.14.0+incompatible // indirect
+	github.com/Azure/go-autorest v10.6.2+incompatible
 	github.com/davecgh/go-spew v1.1.0 // indirect
 	github.com/ghodss/yaml v1.0.0 // indirect
 	github.com/gogo/protobuf v0.0.0-20170330071051-c0656edd0d9e // indirect
