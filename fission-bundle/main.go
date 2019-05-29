@@ -254,12 +254,12 @@ Options:
 		var gcsConfig map[string]string
 		var localConfig map[string]string
 
-		filePath := arguments["--local"].(string)
+		filePath := getStringArgWithDefault(arguments["--local"], "")
 		if filePath == "" {
-			filePath = arguments["--filePath"].(string)
+			filePath = getStringArgWithDefault(arguments["--filePath"], "")
 		}
 
-		subdir := arguments["--local-subdir"].(string)
+		subdir := getStringArgWithDefault(arguments["--local-subdir"], "")
 		if subdir == "" {
 			subdir = os.Getenv("SUBDIR")
 			if subdir == "" {
@@ -269,25 +269,28 @@ Options:
 
 		if filePath != "" {
 			localConfig = map[string]string{
+				storagesvc.ConfigKind:         storagesvc.ConfigKindLocal,
 				storagesvc.ConfigLocalKeyPath: filePath,
 				storagesvc.ConfigContainer:    subdir,
 			}
 		}
 
-		gcsJSONFile := arguments["--gcs-json-file"].(string)
+		gcsJSONFile := getStringArgWithDefault(arguments["--gcs-json-file"], "")
 		if gcsJSONFile != "" {
 			gcsJSON, err := ioutil.ReadFile(gcsJSONFile)
 			if err != nil {
 				log.Fatalf("Error reading GCS JSON file %s: %v", gcsJSONFile, err)
 			}
 			gcsConfig = map[string]string{
-				storagesvc.ConfigContainer:    arguments["--gcs-bucket"].(string),
+				storagesvc.ConfigKind: storagesvc.ConfigKindGCS,
+
+				storagesvc.ConfigContainer:    getStringArgWithDefault(arguments["--gcs-bucket"], ""),
 				storagesvc.ConfigGCSJSON:      string(gcsJSON),
-				storagesvc.ConfigGCSProjectId: arguments["--gcs-project"].(string),
+				storagesvc.ConfigGCSProjectId: getStringArgWithDefault(arguments["--gcs-project"], ""),
 			}
 		}
 
-		readWriteProvider := arguments["--read-write"].(string)
+		readWriteProvider := getStringArgWithDefault(arguments["--read-write"], "")
 		if readWriteProvider == "" {
 			readWriteProvider = "local"
 		}

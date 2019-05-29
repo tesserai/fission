@@ -19,7 +19,6 @@ package storagesvc
 import (
 	"errors"
 	"io"
-	"os"
 	"path/filepath"
 	"time"
 
@@ -53,33 +52,25 @@ var (
 	ErrWritingFileIntoResponse = errors.New("unable to copy item into http response")
 )
 
-func ResolveContainer(provider, containerName string, cfg stow.ConfigMap) (stow.Container, error) {
-	loc, err := stow.Dial(provider, cfg)
+func ResolveContainer(kind, containerName string, cfg stow.ConfigMap) (stow.Container, error) {
+	loc, err := stow.Dial(kind, cfg)
 	if err != nil {
-		log.WithError(err).Error("Error initializing storage")
+		log.WithError(err).Error("Error initializing storage kind: " + kind)
 		return nil, err
 	}
 
-	con, err := loc.CreateContainer(containerName)
-	if os.IsExist(err) {
-		var cons []stow.Container
-		var cursor string
-
-		// use location.Containers to find containers that match the prefix (container name)
-		cons, cursor, err = loc.Containers(containerName, stow.CursorStart, 1)
-		if err == nil {
-			if !stow.IsCursorEnd(cursor) {
-				// Should only have one storage container
-				err = errors.New("Found more than one matched storage containers")
-			} else {
-				con = cons[0]
-			}
-		}
+	// use location.Containers to find containers that match the prefix (container name)
+	con, err := loc.Container(containerName)
+	if err == nil {
+		return con, nil
 	}
+
+	con, err = loc.CreateContainer(containerName)
 	if err != nil {
-		log.WithError(err).Error("Error initializing storage")
+		log.WithError(err).Error("Error creating: " + containerName)
 		return nil, err
 	}
+
 	return con, nil
 }
 
@@ -176,7 +167,7 @@ func (client *StowClient) status(uploadName string) (progress.Counter, int64, er
 
 // copyFileToStream gets the file contents into a stream
 func (client *StowClient) copyFileToStream(uploadName string, w io.Writer) error {
-	item, err := client.writeContainer.Item(uploadName)
+	_, item, err := client.findItemForUploadName(uploadName)
 	if err != nil {
 		if err == stow.ErrNotFound {
 			return ErrNotFound

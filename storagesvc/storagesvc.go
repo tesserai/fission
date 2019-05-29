@@ -44,11 +44,13 @@ import (
 )
 
 const (
-	ConfigProvider  = "fission/storagesvc/provider"
+	ConfigKind      = "fission/storagesvc/kind"
 	ConfigContainer = "fission/storagesvc/container"
 
+	ConfigKindLocal    = local.Kind
 	ConfigLocalKeyPath = local.ConfigKeyPath
 
+	ConfigKindGCS      = google.Kind
 	ConfigGCSJSON      = google.ConfigJSON
 	ConfigGCSProjectId = google.ConfigProjectId
 	ConfigGCSScopes    = google.ConfigScopes
@@ -370,10 +372,10 @@ func (ss *StorageService) healthHandler(w http.ResponseWriter, r *http.Request) 
 }
 
 func resolveContainerFromConfig(config map[string]string) (stow.Container, error) {
-	provider := config[ConfigProvider]
+	kind := config[ConfigKind]
 	containerName := config[ConfigContainer]
 
-	return ResolveContainer(provider, containerName, config)
+	return ResolveContainer(kind, containerName, config)
 }
 
 func MakeStorageService(storageClient *StowClient, port int) *StorageService {
