@@ -14,7 +14,7 @@ ARG GOPKG=github.com/fission/fission
 COPY . /go/src/${GOPKG}
 RUN rm -f /go/src/${GOPKG}/Dockerfile*
 WORKDIR /go/src/${GOPKG}/fission-bundle
-RUN  --mount=type=cache,target=/root/.cache/go-build \
+RUN \
   CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
     -o /go/bin/fission-bundle \
     -gcflags=-trimpath=$GOPATH \
