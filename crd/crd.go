@@ -34,7 +34,7 @@ const (
 // ensureCRD checks if the given CRD type exists, and creates it if
 // needed. (Note that this creates the CRD type; it doesn't create any
 // _instances_ of that type.)
-func ensureCRD(clientset *apiextensionsclient.Clientset, crd *apiextensionsv1beta1.CustomResourceDefinition) (err error) {
+func ensureCRD(clientset apiextensionsclient.Interface, crd *apiextensionsv1beta1.CustomResourceDefinition) (err error) {
 	maxRetries := 5
 
 	for i := 0; i < maxRetries; i++ {
@@ -59,7 +59,7 @@ func ensureCRD(clientset *apiextensionsclient.Clientset, crd *apiextensionsv1bet
 }
 
 // Ensure CRDs
-func EnsureFissionCRDs(clientset *apiextensionsclient.Clientset) error {
+func EnsureFissionCRDs(clientset apiextensionsclient.Interface) error {
 	crds := []apiextensionsv1beta1.CustomResourceDefinition{
 		// Functions
 		{

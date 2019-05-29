@@ -39,4 +39,16 @@ type (
 	RecorderList               = fv1.RecorderList
 	CanaryConfig               = fv1.CanaryConfig
 	CanaryConfigList           = fv1.CanaryConfigList
+
+	Interface interface {
+		Functions(ns string) FunctionInterface
+		Environments(ns string) EnvironmentInterface
+		HTTPTriggers(ns string) HTTPTriggerInterface
+		KubernetesWatchTriggers(ns string) KubernetesWatchTriggerInterface
+		TimeTriggers(ns string) TimeTriggerInterface
+		MessageQueueTriggers(ns string) MessageQueueTriggerInterface
+		Recorders(ns string) RecorderInterface
+		Packages(ns string) PackageInterface
+		CanaryConfigs(ns string) CanaryConfigInterface
+	}
 )
