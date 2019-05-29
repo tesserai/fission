@@ -41,7 +41,7 @@ func init() {
 func createIngress(trigger *crd.HTTPTrigger, kubeClient *kubernetes.Clientset) {
 
 	if !trigger.Spec.CreateIngress {
-		log.Printf("Skipping creation of ingress for trigger: %v", trigger.Metadata.Name)
+		// log.Printf("Skipping creation of ingress for trigger: %v", trigger.Metadata.Name)
 		return
 	}
 

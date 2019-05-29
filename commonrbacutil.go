@@ -224,7 +224,7 @@ func SetupRoleBinding(k8sClient *kubernetes.Clientset, roleBinding, roleBindingN
 		if !isSAInRoleBinding(rbObj, sa, saNamespace) {
 			return AddSaToRoleBindingWithRetries(k8sClient, roleBinding, roleBindingNs, sa, saNamespace, role, roleKind)
 		}
-		log.Printf("SA : %s.%s already present in rolebinding : %s.%s, so nothing to add", sa, saNamespace, roleBinding, roleBindingNs)
+		// log.Printf("SA : %s.%s already present in rolebinding : %s.%s, so nothing to add", sa, saNamespace, roleBinding, roleBindingNs)
 		return nil
 	}
 

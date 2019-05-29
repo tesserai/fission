@@ -39,7 +39,7 @@ func (gpm *GenericPoolManager) makePkgController(fissionClient *crd.FissionClien
 		k8sCache.ResourceEventHandlerFuncs{
 			AddFunc: func(obj interface{}) {
 				pkg := obj.(*crd.Package)
-				log.Printf("List watch for package reported a new package addition: %s.%s", pkg.Metadata.Name, pkg.Metadata.Namespace)
+				// log.Printf("List watch for package reported a new package addition: %s.%s", pkg.Metadata.Name, pkg.Metadata.Namespace)
 
 				// create or update role-binding for fetcher sa in env ns to be able to get the pkg contents from pkg namespace
 				envNs := fissionfnNamespace
@@ -55,7 +55,7 @@ func (gpm *GenericPoolManager) makePkgController(fissionClient *crd.FissionClien
 					return
 				}
 
-				log.Printf("Successfully set up rolebinding for fetcher SA: %s.%s, in packages's ns : %s, for pkg : %s", fission.FissionFetcherSA, envNs, pkg.Metadata.Namespace, pkg.Metadata.Name)
+				// log.Printf("Successfully set up rolebinding for fetcher SA: %s.%s, in packages's ns : %s, for pkg : %s", fission.FissionFetcherSA, envNs, pkg.Metadata.Namespace, pkg.Metadata.Name)
 			},
 
 			UpdateFunc: func(oldObj, newObj interface{}) {

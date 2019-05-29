@@ -267,8 +267,8 @@ func (ts *HTTPTriggerSet) initTriggerController() (k8sCache.Store, k8sCache.Cont
 					if len(recorder.Spec.Triggers) == 0 {
 						ts.recorderSet.triggerRecorderMap.assign(trigger.Metadata.Name, recorder)
 					}
-				} else {
-					log.Print("Unable to lookup function in functionRecorderMap")
+					// } else {
+					// 	log.Print("Unable to lookup function in functionRecorderMap")
 				}
 			},
 			DeleteFunc: func(obj interface{}) {

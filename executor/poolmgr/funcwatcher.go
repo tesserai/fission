@@ -75,8 +75,8 @@ func (gpm *GenericPoolManager) makeFuncController(fissionClient *crd.FissionClie
 				err := fission.SetupRoleBinding(kubernetesClient, fission.SecretConfigMapGetterRB, fn.Metadata.Namespace, fission.SecretConfigMapGetterCR, fission.ClusterRole, fission.FissionFetcherSA, envNs)
 				if err != nil {
 					log.Printf("Error : %v creating %s RoleBinding", err, fission.SecretConfigMapGetterRB)
-				} else {
-					log.Printf("Successfully set up rolebinding for fetcher SA: %s.%s, in func's ns for func : %s/%s", fission.FissionFetcherSA, envNs, fn.Metadata.Namespace, fn.Metadata.Name)
+					// } else {
+					// 	log.Printf("Successfully set up rolebinding for fetcher SA: %s.%s, in func's ns for func : %s/%s", fission.FissionFetcherSA, envNs, fn.Metadata.Namespace, fn.Metadata.Name)
 				}
 
 				if istioEnabled {
