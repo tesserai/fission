@@ -30,7 +30,7 @@ RUN mkdir /emptytmp && chmod 1777 /emptytmp
 FROM scratch
 COPY --from=certs /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 COPY --from=emptydir /emptytmp /tmp
-COPY --from=emptydir /bin/sleep /bin/sleep
+COPY --from=emptydir /bin/busybox /bin/sleep
 COPY --from=builder /go/bin/fetcher /
 
 ENTRYPOINT ["/fetcher"]
